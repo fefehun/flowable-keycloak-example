@@ -12,17 +12,19 @@
  */
 package org.flowable.ui.admin.conf;
 
-import java.util.Collections;
+import com.premiumminds.flowable.conf.KeycloakProperties;
+import com.premiumminds.flowable.filter.KeycloakCookieFilterRegistrationBean;
 
 import org.flowable.ui.admin.security.AjaxLogoutSuccessHandler;
 import org.flowable.ui.admin.security.RemoteIdmAuthenticationProvider;
-import org.flowable.ui.common.filter.FlowableCookieFilterRegistrationBean;
 import org.flowable.ui.common.properties.FlowableCommonAppProperties;
 import org.flowable.ui.common.security.ActuatorRequestMatcher;
 import org.flowable.ui.common.security.ClearFlowableCookieLogoutHandler;
 import org.flowable.ui.common.security.CookieConstants;
 import org.flowable.ui.common.security.DefaultPrivileges;
 import org.flowable.ui.common.service.idm.RemoteIdmService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.actuate.autoconfigure.security.servlet.EndpointRequest;
 import org.springframework.boot.actuate.health.HealthEndpoint;
@@ -37,27 +39,37 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.annotation.web.configuration.WebSecurityConfigurerAdapter;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.header.writers.XXssProtectionHeaderWriter;
 
+/**
+ * Security configuration for Flowable Admin with Keycloak SSO integration.
+ * Based on premium-minds/flowable-keycloak implementation.
+ */
 @Configuration(proxyBeanMethods = false)
 @EnableWebSecurity
 public class SecurityConfiguration {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(SecurityConfiguration.class);
 
     @Autowired
     private RemoteIdmAuthenticationProvider authenticationProvider;
 
     @Bean
-    public FlowableCookieFilterRegistrationBean flowableCookieFilterRegistrationBean(RemoteIdmService remoteIdmService, FlowableCommonAppProperties properties) {
-        FlowableCookieFilterRegistrationBean registrationBean = new FlowableCookieFilterRegistrationBean(remoteIdmService, properties);
-        registrationBean.addUrlPatterns("/app/*");
-        registrationBean.setRequiredPrivileges(Collections.singletonList(DefaultPrivileges.ACCESS_ADMIN));
-        return registrationBean;
+    public KeycloakCookieFilterRegistrationBean keycloakCookieFilterRegistrationBean(RemoteIdmService remoteIdmService,
+            FlowableCommonAppProperties properties, KeycloakProperties keycloakProperties) {
+        KeycloakCookieFilterRegistrationBean filter = new KeycloakCookieFilterRegistrationBean(remoteIdmService, properties, keycloakProperties);
+        filter.addUrlPatterns("/app/*");
+        return filter;
     }
 
     @Autowired
     public void configureGlobal(AuthenticationManagerBuilder auth) {
-
         // Default auth (database backed)
-        auth.authenticationProvider(authenticationProvider);
+        try {
+            auth.authenticationProvider(authenticationProvider);
+        } catch (Exception e) {
+            LOGGER.error("Could not configure authentication mechanism:", e);
+        }
     }
 
     @Configuration
@@ -65,7 +77,7 @@ public class SecurityConfiguration {
     public static class FormLoginWebSecurityConfigurerAdapter extends WebSecurityConfigurerAdapter {
 
         @Autowired
-        protected FlowableCookieFilterRegistrationBean flowableCookieFilterRegistrationBean;
+        protected KeycloakCookieFilterRegistrationBean keycloakCookieFilterRegistrationBean;
 
         @Autowired
         private AjaxLogoutSuccessHandler ajaxLogoutSuccessHandler;
@@ -73,15 +85,23 @@ public class SecurityConfiguration {
         @Override
         protected void configure(HttpSecurity http) throws Exception {
             http
-                    .addFilterBefore(flowableCookieFilterRegistrationBean.getFilter(), UsernamePasswordAuthenticationFilter.class)
+                .sessionManagement()
+                    .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+                .and()
+                    .addFilterBefore(keycloakCookieFilterRegistrationBean.getFilter(), UsernamePasswordAuthenticationFilter.class)
                     .logout()
-                    .logoutUrl("/app/logout")
-                    .logoutSuccessHandler(ajaxLogoutSuccessHandler)
-                    .addLogoutHandler(new ClearFlowableCookieLogoutHandler())
-                    .deleteCookies(CookieConstants.COOKIE_NAME)
-                    .and()
+                        .logoutUrl("/app/logout")
+                        .logoutSuccessHandler(ajaxLogoutSuccessHandler)
+                        .addLogoutHandler(new ClearFlowableCookieLogoutHandler())
+                        .deleteCookies(CookieConstants.COOKIE_NAME)
+                .and()
                     .csrf()
-                    .disable()
+                        .disable()
+                        .headers()
+                        .frameOptions()
+                        .sameOrigin()
+                        .addHeaderWriter(new XXssProtectionHeaderWriter())
+                .and()
                     .authorizeRequests()
                     .antMatchers("/app/rest/**").hasAuthority(DefaultPrivileges.ACCESS_ADMIN);
         }
@@ -93,17 +113,18 @@ public class SecurityConfiguration {
 
     @ConditionalOnClass(EndpointRequest.class)
     @Configuration
-    @Order(5) // Actuator configuration should kick in before the Form Login there should always be http basic for the endpoints
+    @Order(5)
     public static class ActuatorWebSecurityConfigurationAdapter extends WebSecurityConfigurerAdapter {
 
+        @Override
         protected void configure(HttpSecurity http) throws Exception {
 
             http
                 .sessionManagement()
-                .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+                    .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 .and()
-                .csrf()
-                .disable();
+                    .csrf()
+                    .disable();
 
             http
                 .requestMatcher(new ActuatorRequestMatcher())

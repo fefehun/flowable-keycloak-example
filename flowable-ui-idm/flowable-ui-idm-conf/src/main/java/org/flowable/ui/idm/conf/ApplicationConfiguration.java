@@ -14,6 +14,10 @@ package org.flowable.ui.idm.conf;
 
 import org.flowable.ui.common.service.idm.RemoteIdmServiceImpl;
 import org.flowable.ui.idm.properties.FlowableIdmAppProperties;
+import org.flowable.ui.idm.security.CustomDaoAuthenticationProvider;
+import org.flowable.ui.idm.security.CustomLdapAuthenticationProvider;
+import org.flowable.ui.idm.security.CustomPersistentRememberMeServices;
+import org.flowable.ui.idm.security.UserDetailsService;
 import org.flowable.ui.idm.servlet.ApiDispatcherServletConfiguration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.web.servlet.ServletRegistrationBean;
@@ -25,6 +29,18 @@ import org.springframework.context.annotation.FilterType;
 import org.springframework.web.context.support.AnnotationConfigWebApplicationContext;
 import org.springframework.web.servlet.DispatcherServlet;
 
+/**
+ * Application configuration for Flowable IDM with Keycloak SSO integration.
+ *
+ * In Keycloak mode, we exclude the local authentication components because
+ * all authentication is handled by Keycloak via KeycloakCookieFilter.
+ * The excluded classes are:
+ * - RemoteIdmServiceImpl - replaced by KeycloakServiceImpl
+ * - CustomPersistentRememberMeServices - not needed, Keycloak handles sessions
+ * - CustomDaoAuthenticationProvider - not needed, Keycloak handles auth
+ * - CustomLdapAuthenticationProvider - not needed, Keycloak handles auth
+ * - UserDetailsService - not needed, Keycloak provides user details
+ */
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(FlowableIdmAppProperties.class)
 @ComponentScan(basePackages = {
@@ -32,7 +48,13 @@ import org.springframework.web.servlet.DispatcherServlet;
     "org.flowable.ui.idm.conf",
     "org.flowable.ui.idm.security",
     "org.flowable.ui.idm.idm",
-    "org.flowable.ui.idm.service"}, excludeFilters = {@ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, value = RemoteIdmServiceImpl.class)})
+    "org.flowable.ui.idm.service"}, excludeFilters = {
+        @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, value = RemoteIdmServiceImpl.class),
+        @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, value = CustomPersistentRememberMeServices.class),
+        @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, value = CustomDaoAuthenticationProvider.class),
+        @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, value = CustomLdapAuthenticationProvider.class),
+        @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, value = UserDetailsService.class)
+    })
 public class ApplicationConfiguration {
 
     @Bean
