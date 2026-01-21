@@ -85,7 +85,19 @@ For Docker deployment, see [flowable-keycloak-env](https://github.com/fefehun/fl
 
 ## Keycloak Configuration
 
-Required Keycloak client roles:
+### Required Environment Variable
+
+You must set the Keycloak client secret before running:
+
+```bash
+export KEYCLOAK_CLIENT_SECRET=your-actual-client-secret
+```
+
+Or update the `flowable-default.properties` files in each module with your secret.
+
+### Required Keycloak Client Roles
+
+Configure these roles in your Keycloak client:
 - `access-modeler`
 - `access-idm`
 - `access-admin`
